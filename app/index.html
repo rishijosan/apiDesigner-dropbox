@@ -29,8 +29,11 @@
   </head>
   <body ng-app="ramlEditorApp" class="{{$root.theme}}">
     <div class="container" ng-include src="'views/raml-editor-main.tmpl.html'"></div>
-
+	
+	<!-- Dropbox Datastore SDK
 	<script src="https://www.dropbox.com/static/api/dropbox-datastores-1.0-latest.js" type="text/javascript"></script>
+	 -->
+	<script src="vendor/scripts/dropbox-datastores-1.0-latest.js"></script>
     <!-- build:js({.,.tmp,app}) scripts/vendor.js -->
     <script src="vendor/scripts/codemirror.js"></script>
     <script src="vendor/scripts/foldcode.js"></script>
@@ -92,8 +95,10 @@
 	
 <script>
 
-
+	<!-- Dropbox Client Key -->
 	var client = new Dropbox.Client({key: 'xzz93647oxc8wgj'});
+	
+	
 	// Try to finish OAuth authorization.
 	client.authenticate({interactive: true}, function (error) {
 		if (error) {
@@ -105,10 +110,7 @@
 		console.log("Authenticated");
 	}
 
-		
-
-      // This part is needed only if you want to provide your own Persistance Implementation
-      // Angular Module must match "ramlEditorApp"
+      // Dropbox Persistance Implementation
       angular.module('ramlEditorApp')
       .factory('MyFileSystem', function ($q, config, eventService) {
         var service = {};
@@ -123,25 +125,17 @@
 		  var entries = new Array();
 		  var rootFolder = {};
 		 
-        
-          // Your magic goes here:
-           // Do deferred.resolve(data); to fulfull the promise or
-           // deferred.reject(error); to reject it.
-        
-			
-			
-			var datastoreManager = client.getDatastoreManager();	
 
+			var datastoreManager = client.getDatastoreManager();	
 
 			datastoreManager.openDefaultDatastore(function (error, datastore) {
 				if (error) {
 				console.log('Error opening default datastore in Directory: ' + error);
+				deferred.reject('Error opening default datastore');
+				return deferred.promise;
 				}
-				//console.log(datastoreManager);			
-				//console.log(datastore);
-				
-				// Now you have a datastore. The next few examples can be included here.
-	
+
+				//Get or Create api-designer 
 				ramlFileTable = datastore.getTable('api-designer');
 				var results = ramlFileTable.query();
 				
@@ -185,20 +179,26 @@
         };
 
         service.load = function (path, name) {
-          var deferred = $q.defer();
+          
+		  var deferred = $q.defer();
         
-          // Your magic goes here:
-           // Do deferred.resolve(data); to fulfull the promise or
-           // deferred.reject(error); to reject it.
 		   
-		   console.log("Loading Files - Path : " + path + " name : " + name);
+				//console.log("Loading Files - Path : " + path + " name : " + name);
 
 				var resultFile = ramlFileTable.query({path: path});
 				
 				//console.log(resultFile);
 				//console.log('Content : ' + resultFile.content);
 				
+				if (resultFile.length == 1)
+				{
 				deferred.resolve(JSON.parse(resultFile[0].get('content')));
+				}
+				else if (resultFile.length == 0)
+				deferred.reject('No file found');
+				else
+				deferred.reject('Mutliple files with same path');
+
 
            return deferred.promise;
         };
@@ -206,37 +206,49 @@
         service.remove = function (path, name) {
           var deferred = $q.defer();
         
-          // Your magic goes here:
-           // Do deferred.resolve(data); to fulfull the promise or
-           // deferred.reject(error); to reject it.
 		   console.log("Removing Files - Path : " + path);
 		   
 
 				var resultFile = ramlFileTable.query({path: path});
 				
-				console.log(resultFile);
+				//console.log(resultFile);
+				
+				if (resultFile.length == 1)
+				{
 				resultFile[0].deleteRecord();
 				deferred.resolve();
+				}
+				else if (resultFile.length == 0)
+				deferred.reject('No file found');
+				else
+				deferred.reject('Mutliple files with same path');
 
            return deferred.promise;
         };
 		
 		
 		
-	   service.rename = function (source, destination) {
+	    service.rename = function (source, destination) {
        
-	   var deferred = $q.defer();
-	   var srcFile = source.substring(1,source.length);
-	   var destFile = destination.substring(1,destination.length);
+	    var deferred = $q.defer();
+	    var srcFile = source.substring(1,source.length);
+	    var destFile = destination.substring(1,destination.length);
 	     
-	   console.log('Renaming File : ' + srcFile + ' to : ' + destFile );
+	    console.log('Renaming File : ' + srcFile + ' to : ' + destFile );
 	   
-	   var resultFile = ramlFileTable.query({path: source});
-	   resultFile[0].set('path' , destination);
-	   resultFile[0].set('name' , destFile);
+	    var resultFile = ramlFileTable.query({path: source});
+		if (resultFile.length == 1)
+		{		
+	    resultFile[0].set('path' , destination).set('name' , destFile);
+	    //resultFile[0].set('name' , destFile);
+		deferred.resolve();
+		}
+	    else if (resultFile.length == 0)
+	    deferred.reject('No file found');
+		else
+	    deferred.reject('Mutliple files with same path');
 	   
-	   deferred.resolve();
-	   
+
 	   return deferred.promise;
 	   
 	   
@@ -253,19 +265,17 @@
 			
 				var resultFile = ramlFileTable.query({path: path});
 				
-				if (resultFile.length == 1)
+				
+				if (resultFile.length == 1)		//File Exists
 				{
 					//console.log("In Update")
-					//File Exists
 					resultFile[0].set('content' , JSON.stringify(content)),
 					resultFile[0].set('lastUpdated' , Math.round(new Date().getTime()/1000.0))
-					
+					deferred.resolve();
 				}
-		
-				else
+				else if (resultFile.length == 0)	//Create New File
 				{
 					//console.log("In Create")
-					//Create New File
 				  var insert = ramlFileTable.insert({
 				  path: path,
 				  name: fileName,
@@ -273,19 +283,25 @@
 				  content: JSON.stringify(content),
 				  lastUpdated: Math.round(new Date().getTime()/1000.0)
 				});
-				
-				
+				deferred.resolve();
+				}
+				else
+				{
+					deferred.reject('Mutliple files with same path');
 				}
 				
-				deferred.resolve();
-
            return deferred.promise;
         };
 
         return service;
       })
+	  
       .run(function (MyFileSystem, config, eventService) {
         // Set MyFileSystem as the filesystem to use
+		
+		eventService.broadcast('event:notification',
+        {message: 'Attempting to Authenticate via Dropbox', expires: false});
+		  
         config.set('fsFactory', 'MyFileSystem');
         
         // In case you want to send notifications to the user
@@ -294,7 +310,7 @@
         // it should be hidden after a period of time or the
         // user should dismiss it manually.
         eventService.broadcast('event:notification',
-          {message: 'File saved.', expires: true});
+          {message: 'Authenticated via Dropbox', expires: true});
 
       });
 
